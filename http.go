@@ -2,8 +2,8 @@ package dispatcher
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
+	"net/url"
 	"reflect"
 	"sync"
 )
@@ -94,20 +94,6 @@ func (h *HTTPHandler) init() {
 	})
 }
 
-// Register registers path with struct
-func (h *HTTPHandler) Register(path string, msg Message) {
-	h.init()
-
-	t := reflect.TypeOf(msg)
-	if t.Kind() != reflect.Ptr {
-		panic("dispatcher/httprpc: msg is not a Message")
-	}
-	if _, ok := t.Elem().FieldByName(h.ResultField); !ok {
-		panic(fmt.Sprintf("dispatcher/httprpc: msg don't have '%s' field", h.ResultField))
-	}
-	h.m[path] = t.Elem()
-}
-
 func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.init()
 
@@ -137,4 +123,36 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.ErrorEncoder(w, r, err)
 		return
 	}
+}
+
+// HTTPMux multiplexs http path into struct path
+type HTTPMux struct {
+	Handler http.Handler
+
+	m map[string]string
+}
+
+// Register registers path with struct
+func (m *HTTPMux) Register(path string, msg Message) {
+	if m.m == nil {
+		m.m = make(map[string]string)
+	}
+
+	t := msgName(msg)
+	if t == "" {
+		panic("dispatcher/http: msg is not a Message")
+	}
+
+	m.m[path] = t
+}
+
+func (m *HTTPMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	t := m.m[r.URL.Path]
+
+	r2 := new(http.Request)
+	*r2 = *r
+	r2.URL = new(url.URL)
+	*r2.URL = *r.URL
+	r2.URL.Path = t
+	m.Handler.ServeHTTP(w, r2)
 }
